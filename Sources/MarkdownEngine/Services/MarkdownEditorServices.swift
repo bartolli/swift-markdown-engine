@@ -278,6 +278,10 @@ public struct MarkdownEditorBus: Sendable {
     /// The engine posts `findResults` with the count still matching afterward
     /// (non-zero only if the replacement itself contains the query).
     public var replaceAll: Notification.Name?
+    /// Posted by the host UI to redraw inline annotation marks after the provider's
+    /// rows changed without a text change. Optional `userInfo["range"] as? NSRange`;
+    /// absent means the whole document.
+    public var invalidateAnnotationsRequest: Notification.Name?
 
     public init(
         applyBoldRequest: Notification.Name? = nil,
@@ -301,7 +305,8 @@ public struct MarkdownEditorBus: Sendable {
         findQuery: Notification.Name? = nil,
         findResults: Notification.Name? = nil,
         replaceCurrent: Notification.Name? = nil,
-        replaceAll: Notification.Name? = nil
+        replaceAll: Notification.Name? = nil,
+        invalidateAnnotationsRequest: Notification.Name? = nil
     ) {
         self.applyBoldRequest = applyBoldRequest
         self.applyItalicRequest = applyItalicRequest
@@ -325,6 +330,7 @@ public struct MarkdownEditorBus: Sendable {
         self.findResults = findResults
         self.replaceCurrent = replaceCurrent
         self.replaceAll = replaceAll
+        self.invalidateAnnotationsRequest = invalidateAnnotationsRequest
     }
 
     public static let `default` = MarkdownEditorBus()
@@ -343,19 +349,23 @@ public struct MarkdownEditorServices: Sendable {
     public var syntaxHighlighter: any SyntaxHighlighter
     public var latex: any LatexRenderer
     public var bus: MarkdownEditorBus
+    /// Draws entity underlines and finding squiggles at fragment draw time. nil draws none.
+    public var annotations: (any InlineAnnotationProvider)?
 
     public init(
         wikiLinks: any WikiLinkResolver = NoOpWikiLinkResolver(),
         images: any EmbeddedImageProvider = NoOpEmbeddedImageProvider(),
         syntaxHighlighter: any SyntaxHighlighter = PlainTextSyntaxHighlighter(),
         latex: any LatexRenderer = NoOpLatexRenderer(),
-        bus: MarkdownEditorBus = .default
+        bus: MarkdownEditorBus = .default,
+        annotations: (any InlineAnnotationProvider)? = nil
     ) {
         self.wikiLinks = wikiLinks
         self.images = images
         self.syntaxHighlighter = syntaxHighlighter
         self.latex = latex
         self.bus = bus
+        self.annotations = annotations
     }
 
     public static let `default` = MarkdownEditorServices()

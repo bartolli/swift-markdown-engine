@@ -96,6 +96,10 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
         for fill in blockBackgroundFills(at: .zero) {
             bounds = bounds.union(fill.rect)
         }
+        // Annotation marks hang below the descender.
+        for mark in annotationMarks(at: .zero) {
+            bounds = bounds.union(mark.rect)
+        }
         return bounds
     }
 
@@ -113,6 +117,9 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
         // 3. Normal text
         super.draw(at: point, in: context)
+
+        // 3b. Annotation marks from the provider service (over the text)
+        drawAnnotations(at: point, in: context)
 
         // 4. Task checkboxes (on top of hidden [ ]/[x] markers)
         drawTaskCheckboxes(at: point, in: context)
@@ -132,7 +139,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
     // MARK: - Helpers
 
     /// NSRange in the document for this fragment's content.
-    private var fragmentNSRange: NSRange? {
+    var fragmentNSRange: NSRange? {
         guard let tcs = textLayoutManager?.textContentManager as? NSTextContentStorage else { return nil }
         let start = tcs.offset(from: tcs.documentRange.location, to: rangeInElement.location)
         let end = tcs.offset(from: tcs.documentRange.location, to: rangeInElement.endLocation)
@@ -146,7 +153,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
     /// Returns the drawing position for a character at `docIndex` (document-level NSRange location).
     /// `point` is the draw origin passed to `draw(at:in:)`.
-    private func drawPosition(forDocumentCharAt docIndex: Int, point: CGPoint) -> (x: CGFloat, baselineY: CGFloat, lineHeight: CGFloat)? {
+    func drawPosition(forDocumentCharAt docIndex: Int, point: CGPoint) -> (x: CGFloat, baselineY: CGFloat, lineHeight: CGFloat)? {
         guard let fragRange = fragmentNSRange else { return nil }
         let localIndex = docIndex - fragRange.location
         guard localIndex >= 0 else { return nil }
@@ -171,7 +178,7 @@ final class MarkdownTextLayoutFragment: NSTextLayoutFragment {
 
     /// Typographic bounds of the line fragment containing `localIndex`
     /// (index relative to the fragment, not the document).
-    private func lineBounds(forLocalIndex localIndex: Int, point: CGPoint) -> CGRect? {
+    func lineBounds(forLocalIndex localIndex: Int, point: CGPoint) -> CGRect? {
         for lineFragment in textLineFragments {
             let lr = lineFragment.characterRange
             if localIndex >= lr.location && localIndex < lr.location + lr.length {

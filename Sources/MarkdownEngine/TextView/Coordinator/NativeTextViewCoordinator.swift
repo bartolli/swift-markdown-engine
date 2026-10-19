@@ -339,6 +339,11 @@ public final class NativeTextViewCoordinator: NSObject, NSTextViewDelegate {
         let bus = configuration.services.bus
         let center = NotificationCenter.default
 
+        if let name = bus.invalidateAnnotationsRequest {
+            busObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
+                self?.handleInvalidateAnnotationsNotification(notification)
+            })
+        }
         if let name = bus.applyBoldRequest {
             busObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] notification in
                 self?.handleBoldNotification(notification)
