@@ -3,10 +3,11 @@
 //  MarkdownEngine
 //
 //  Draw step for `InlineAnnotationProvider`. After the text has drawn, the
-//  fragment asks the provider for the annotations in its range, maps each to
-//  one rect per line below the descender, and strokes a dotted line for an
-//  entity or a wavy line for a finding. No storage or rendering attribute is
-//  involved: a restyle never repaints a mark and a mark never moves the text.
+//  fragment asks the provider for the annotations in its storage range, maps
+//  each through `AnnotationDisplayMap` to the display form and to one rect
+//  per line below the descender, and strokes a dotted line for an entity or
+//  a wavy line for a finding. No storage or rendering attribute is involved:
+//  a restyle never repaints a mark and a mark never moves the text.
 //
 
 import AppKit
@@ -29,6 +30,13 @@ extension MarkdownTextLayoutFragment {
         textLayoutManager?.textContainer?.textView as? NativeTextView
     }
 
+    /// The coordinator's wiki-link table; the identity without a coordinator
+    /// (a storage built headless from raw text) or in raw source mode.
+    private var displayMap: AnnotationDisplayMap {
+        guard let coordinator = nativeTextView?.delegate as? NativeTextViewCoordinator else { return .identity }
+        return AnnotationDisplayMap(coordinator.wikiLinkMetadata)
+    }
+
     /// Marks for every annotation the provider reports in this fragment, one
     /// per line the annotation touches, relative to `point`. Headless:
     /// `renderingSurfaceBounds` calls it with `.zero` to widen the surface,
@@ -38,9 +46,11 @@ extension MarkdownTextLayoutFragment {
               let provider = textView.configuration.services.annotations,
               let fragRange = fragmentNSRange, fragRange.length > 0 else { return [] }
         let font = textView.baseFont
+        let map = displayMap
         var marks: [AnnotationMark] = []
-        for annotation in provider.annotations(in: fragRange) {
-            let clipped = NSIntersectionRange(annotation.range, fragRange)
+        for annotation in provider.annotations(in: map.storageRange(forDisplay: fragRange)) {
+            guard let displayRange = map.displayRange(forStorage: annotation.range) else { continue }
+            let clipped = NSIntersectionRange(displayRange, fragRange)
             guard clipped.length > 0 else { continue }
             let local = NSRange(location: clipped.location - fragRange.location, length: clipped.length)
             for lineFragment in textLineFragments {

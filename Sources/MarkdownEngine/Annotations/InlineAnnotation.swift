@@ -37,7 +37,7 @@ public struct InlineAnnotation: Sendable, Hashable {
 /// for every fragment that lays out or draws, so an implementation should be
 /// an in-memory lookup over rows the host already holds.
 public protocol InlineAnnotationProvider: Sendable {
-    /// Annotations intersecting `range`. Returned ranges may extend past it;
-    /// the fragment clips them.
+    /// Annotations intersecting `range`, a storage-coordinate range. Returned
+    /// ranges may extend past it; the fragment clips them.
     func annotations(in range: NSRange) -> [InlineAnnotation]
 }

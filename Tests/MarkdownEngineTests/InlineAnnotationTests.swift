@@ -119,6 +119,57 @@ struct InlineAnnotationTests {
         return tv
     }
 
+    /// A laid-out editor whose storage the coordinator built from the storage
+    /// form through the display state, as `updateNSView` does, so the text
+    /// view holds `[[Name]]` and the coordinator the wiki-link table.
+    private func makeDisplayEditor(
+        storage: String, configuration: MarkdownEditorConfiguration, width: CGFloat = 400
+    ) -> (NativeTextViewCoordinator, NativeTextView) {
+        _ = NSApplication.shared
+        let coordinator = NativeTextViewCoordinator(
+            text: .constant(storage), fontName: fontName, fontSize: fontSize,
+            isWikiLinkActive: .constant(false), onLinkClick: nil, onInlineSelectionChange: nil
+        )
+        coordinator.configuration = configuration
+        let tv = NativeTextView(frame: NSRect(x: 0, y: 0, width: width, height: 400))
+        tv.configuration = configuration
+        tv.baseFont = NSFont(name: fontName, size: fontSize) ?? .systemFont(ofSize: fontSize)
+        tv.textContainer?.size = NSSize(width: width, height: .greatestFiniteMagnitude)
+        tv.delegate = coordinator
+        coordinator.textView = tv
+        // Set before the rebuild's own layout pass, as the wrapper does, so the fragments are the engine's.
+        let layoutDelegate = MarkdownLayoutManagerDelegate()
+        coordinator.layoutDelegate = layoutDelegate
+        tv.textLayoutManager?.delegate = layoutDelegate
+        coordinator.rebuildTextStorageAndStyle(tv, from: storage)
+        return (coordinator, tv)
+    }
+
+    /// Glyph rect of a display range in the fragment's own space, read from
+    /// the layout manager's text segments rather than the fragment's helpers.
+    private func glyphRect(
+        of range: NSRange, in tv: NativeTextView, fragment: MarkdownTextLayoutFragment
+    ) throws -> CGRect {
+        let tlm = try #require(tv.textLayoutManager)
+        let container = try #require(tv.textContainer)
+        let rect = LayoutBridge(tlm).boundingRect(forCharacterRange: range, in: container)
+        return rect.offsetBy(dx: -fragment.layoutFragmentFrame.minX, dy: -fragment.layoutFragmentFrame.minY)
+    }
+
+    /// Each mark's horizontal extent equals the glyph extent of its word, in order.
+    private func expectMarks(
+        _ marks: [MarkdownTextLayoutFragment.AnnotationMark], cover words: [String],
+        in tv: NativeTextView, fragment: MarkdownTextLayoutFragment
+    ) throws {
+        let display = tv.string as NSString
+        #expect(marks.count == words.count)
+        for (mark, word) in zip(marks, words) {
+            let glyphs = try glyphRect(of: display.range(of: word), in: tv, fragment: fragment)
+            #expect(abs(mark.rect.minX - glyphs.minX) < 0.5, "\(word) starts at \(glyphs.minX), mark at \(mark.rect.minX)")
+            #expect(abs(mark.rect.maxX - glyphs.maxX) < 0.5, "\(word) ends at \(glyphs.maxX), mark at \(mark.rect.maxX)")
+        }
+    }
+
     private func firstFragment(in tv: NativeTextView) -> MarkdownTextLayoutFragment? {
         guard let tlm = tv.textLayoutManager, let tcm = tlm.textContentManager else { return nil }
         let delegate = MarkdownLayoutManagerDelegate()
@@ -211,6 +262,55 @@ struct InlineAnnotationTests {
 
         #expect(storage.isEqual(to: before), "draw must not touch the storage's attributes")
         #expect(Array(storage.string.utf16) == Array(before.string.utf16), "draw must not touch the storage's text")
+    }
+
+    private static let linkStorage = "Ada walked with [[mara-voss|Mara]] to the mill."
+    private static let linkDisplay = "Ada walked with [[mara-voss]] to the mill."
+
+    /// Storage-coordinate rows over `linkStorage`: a word before the link, the
+    /// whole link, the hidden `Mara` run alone, and a word after the link.
+    private static var linkRows: [InlineAnnotation] {
+        let storage = linkStorage as NSString
+        let hidden = storage.range(of: "|Mara")
+        return [
+            InlineAnnotation(range: storage.range(of: "Ada"), kind: .entity(slug: "ada")),
+            InlineAnnotation(range: storage.range(of: "[[mara-voss|Mara]]"), kind: .entity(slug: "mara-voss")),
+            InlineAnnotation(range: NSRange(location: hidden.location + 1, length: hidden.length - 1), kind: .finding(severity: .error)),
+            InlineAnnotation(range: storage.range(of: "the mill"), kind: .entity(slug: "the-mill")),
+        ]
+    }
+
+    @Test("storage-coordinate ranges are asked for and mapped through the wiki-link table onto the display form")
+    func marksMapStorageRangesToTheDisplayForm() throws {
+        let provider = RecordingProvider(Self.linkRows)
+        let (coordinator, tv) = makeDisplayEditor(storage: Self.linkStorage, configuration: configuration(provider: provider))
+        #expect(tv.string == Self.linkDisplay)
+        #expect(coordinator.wikiLinkMetadata.count == 1)
+        let fragment = try #require(firstFragment(in: tv))
+
+        provider.reset()
+        let marks = fragment.annotationMarks(at: .zero).sorted { $0.rect.minX < $1.rect.minX }
+        #expect(provider.queries == [NSRange(location: 0, length: (Self.linkStorage as NSString).length)],
+                "the provider is asked over the fragment's storage span, asked \(provider.queries)")
+        // The hidden-run row collapses to nothing on display and is not drawn.
+        #expect(marks.map(\.kind) == [.entity(slug: "ada"), .entity(slug: "mara-voss"), .entity(slug: "the-mill")])
+        try expectMarks(marks, cover: ["Ada", "[[mara-voss]]", "the mill"], in: tv, fragment: fragment)
+    }
+
+    @Test("raw source mode leaves no table and the mapping is the identity")
+    func rawSourceModeIsTheIdentity() throws {
+        var config = configuration(provider: RecordingProvider(Self.linkRows))
+        config.rawSourceMode = true
+        let (coordinator, tv) = makeDisplayEditor(storage: Self.linkStorage, configuration: config)
+        #expect(tv.string == Self.linkStorage)
+        #expect(coordinator.wikiLinkMetadata.isEmpty)
+        let fragment = try #require(firstFragment(in: tv))
+
+        let marks = fragment.annotationMarks(at: .zero).sorted { $0.rect.minX < $1.rect.minX }
+        #expect(marks.map(\.kind) == [
+            .entity(slug: "ada"), .entity(slug: "mara-voss"), .finding(severity: .error), .entity(slug: "the-mill"),
+        ])
+        try expectMarks(marks, cover: ["Ada", "[[mara-voss|Mara]]", "Mara", "the mill"], in: tv, fragment: fragment)
     }
 
     @Test("no provider by default: no marks and the surface is the text's own")
