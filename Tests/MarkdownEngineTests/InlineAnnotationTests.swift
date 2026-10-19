@@ -313,6 +313,33 @@ struct InlineAnnotationTests {
         try expectMarks(marks, cover: ["Ada", "[[mara-voss|Mara]]", "Mara", "the mill"], in: tv, fragment: fragment)
     }
 
+    @Test("a finding over an entity range stacks below the dotted mark; one alone starts at the descender")
+    func findingOverAnEntityStacks() throws {
+        let rows = [
+            InlineAnnotation(range: Self.range(of: "Ada"), kind: .entity(slug: "ada")),
+            InlineAnnotation(range: Self.range(of: "Ada walked"), kind: .finding(severity: .error)),
+            InlineAnnotation(range: Self.range(of: "mill road"), kind: .finding(severity: .warning)),
+        ]
+        let tv = makeTextView(configuration: configuration(provider: RecordingProvider(rows)))
+        let fragment = try #require(firstFragment(in: tv))
+        let marks = fragment.annotationMarks(at: .zero)
+        #expect(marks.map(\.kind) == [.entity(slug: "ada"), .finding(severity: .error), .finding(severity: .warning)])
+        let (ada, stacked, alone) = (marks[0], marks[1], marks[2])
+        #expect(alone.rect.minY == ada.rect.minY, "an unstacked finding starts where the entity mark does")
+        #expect(stacked.rect.minY == ada.rect.minY + MarkdownTextLayoutFragment.annotationStackOffset,
+                "the finding over Ada should drop by the stack offset: \(stacked.rect.minY) vs \(ada.rect.minY)")
+        #expect(stacked.rect.minY >= ada.rect.maxY, "the wave must start below the dotted mark")
+        #expect(fragment.renderingSurfaceBounds.contains(stacked.rect), "the surface follows the lowered wave")
+
+        // Both marks have ink in their own colour inside their own rect, and
+        // the dotted mark is not painted over: no error ink in its band.
+        let bitmap = try render(fragment)
+        let theme = tv.configuration.theme
+        #expect(bitmap.count(in: ada.rect, matching: theme.link) > 0, "no entity ink under Ada")
+        #expect(bitmap.count(in: stacked.rect, matching: .systemRed) > 0, "no error ink in the stacked band")
+        #expect(bitmap.count(in: ada.rect, matching: .systemRed) == 0, "the wave covers the dotted mark")
+    }
+
     @Test("no provider by default: no marks and the surface is the text's own")
     func nilProviderIsTheDefault() throws {
         #expect(MarkdownEditorServices.default.annotations == nil)

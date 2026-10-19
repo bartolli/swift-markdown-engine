@@ -25,6 +25,10 @@ extension MarkdownTextLayoutFragment {
     static let annotationWaveHeight: CGFloat = 3
     /// Horizontal distance between a wave's peaks.
     static let annotationWaveHalfPeriod: CGFloat = 2
+    /// How far a finding's wave drops when it shares a range with an entity
+    /// mark: the entity mark's height plus one stroke of clearance, so both
+    /// read.
+    static let annotationStackOffset: CGFloat = annotationStrokeWidth * 2
 
     private var nativeTextView: NativeTextView? {
         textLayoutManager?.textContainer?.textView as? NativeTextView
@@ -47,9 +51,15 @@ extension MarkdownTextLayoutFragment {
               let fragRange = fragmentNSRange, fragRange.length > 0 else { return [] }
         let font = textView.baseFont
         let map = displayMap
+        let annotations = provider.annotations(in: map.storageRange(forDisplay: fragRange))
+        let entityRanges = annotations.compactMap { annotation -> NSRange? in
+            if case .entity = annotation.kind { return annotation.range }
+            return nil
+        }
         var marks: [AnnotationMark] = []
-        for annotation in provider.annotations(in: map.storageRange(forDisplay: fragRange)) {
+        for annotation in annotations {
             guard let displayRange = map.displayRange(forStorage: annotation.range) else { continue }
+            let stacked = Self.stacks(annotation, over: entityRanges)
             let clipped = NSIntersectionRange(displayRange, fragRange)
             guard clipped.length > 0 else { continue }
             let local = NSRange(location: clipped.location - fragRange.location, length: clipped.length)
@@ -66,7 +76,7 @@ extension MarkdownTextLayoutFragment {
                     ? line.maxX
                     : point.x + lineFragment.typographicBounds.origin.x + lineFragment.locationForCharacter(at: hitEnd).x
                 guard endX > start.x else { continue }
-                let band = Self.annotationBand(for: annotation.kind, baselineY: start.baselineY, font: font)
+                let band = Self.annotationBand(for: annotation.kind, baselineY: start.baselineY, font: font, stacked: stacked)
                 marks.append(AnnotationMark(
                     rect: CGRect(x: start.x, y: band.minY, width: endX - start.x, height: band.height),
                     kind: annotation.kind
@@ -76,18 +86,28 @@ extension MarkdownTextLayoutFragment {
         return marks
     }
 
+    /// A finding stacks when its storage range shares a code unit with an
+    /// entity range: the wave drops below the dotted mark instead of
+    /// covering it. The whole annotation drops, so a wave stays level
+    /// across its lines.
+    static func stacks(_ annotation: InlineAnnotation, over entityRanges: [NSRange]) -> Bool {
+        guard case .finding = annotation.kind else { return false }
+        return entityRanges.contains { NSIntersectionRange($0, annotation.range).length > 0 }
+    }
+
     /// Vertical band a mark occupies. Both kinds start at the bottom of the
     /// descender so a mark never crosses glyph ink, which puts them outside
-    /// the glyph box: the surface has to be widened for them.
+    /// the glyph box: the surface has to be widened for them. A stacked
+    /// finding starts `annotationStackOffset` lower.
     static func annotationBand(
-        for kind: InlineAnnotationKind, baselineY: CGFloat, font: NSFont
+        for kind: InlineAnnotationKind, baselineY: CGFloat, font: NSFont, stacked: Bool = false
     ) -> (minY: CGFloat, height: CGFloat) {
         let top = baselineY + max(0, -font.descender)
         switch kind {
         case .entity:
             return (top, annotationStrokeWidth)
         case .finding:
-            return (top, annotationWaveHeight + annotationStrokeWidth)
+            return (top + (stacked ? annotationStackOffset : 0), annotationWaveHeight + annotationStrokeWidth)
         }
     }
 
