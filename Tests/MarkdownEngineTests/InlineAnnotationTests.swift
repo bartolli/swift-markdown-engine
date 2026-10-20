@@ -297,6 +297,21 @@ struct InlineAnnotationTests {
         try expectMarks(marks, cover: ["Ada", "[[mara-voss]]", "the mill"], in: tv, fragment: fragment)
     }
 
+    @Test("the redraw hook invalidates layout over its storage range, so the fragment lays out again and asks the provider")
+    func invalidateAnnotationsLaysOutTheRangeAgain() throws {
+        let provider = RecordingProvider(Self.linkRows)
+        let (coordinator, tv) = makeDisplayEditor(storage: Self.linkStorage, configuration: configuration(provider: provider))
+        _ = try #require(firstFragment(in: tv))
+
+        provider.reset()
+        coordinator.invalidateAnnotations(in: (Self.linkStorage as NSString).range(of: "the mill"))
+        #expect(!provider.queries.isEmpty, "a laid-out fragment is laid out again over the range")
+
+        provider.reset()
+        coordinator.invalidateAnnotations(in: nil)
+        #expect(!provider.queries.isEmpty, "nil is the whole document")
+    }
+
     @Test("raw source mode leaves no table and the mapping is the identity")
     func rawSourceModeIsTheIdentity() throws {
         var config = configuration(provider: RecordingProvider(Self.linkRows))
